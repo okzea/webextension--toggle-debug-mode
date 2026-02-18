@@ -1,40 +1,69 @@
-const browser = window.browser || window.chrome;
+const browser = window.browser ?? window.chrome;
 
-var currentTab;
-var parsedUrl;
-var currentDebugStatus;
+let currentTab;
+let parsedUrl;
+let currentDebugStatus = false;
+
+const colorSchemeQuery = window.matchMedia?.("(prefers-color-scheme: dark)") ?? null;
+const iconPaths = {
+  active: { light: "icons/bug-active-light.svg", dark: "icons/bug-active-dark.svg" },
+  inactive: { light: "icons/bug-inactive-light.svg", dark: "icons/bug-inactive-dark.svg" },
+};
+
+function getThemeMode() {
+  return colorSchemeQuery?.matches ? "dark" : "light";
+}
 
 function updateIcon() {
+  if (!currentTab?.id) return;
+
+  const themeMode = getThemeMode();
+  const debugState = currentDebugStatus ? "active" : "inactive";
+
   browser.browserAction.setIcon({
-    path: currentDebugStatus ? "icons/icon-enabled.svg" : "icons/icon-disabled.svg",
-    tabId: currentTab.id
+    path: iconPaths[debugState][themeMode],
+    tabId: currentTab.id,
   });
   browser.browserAction.setTitle({
-    title: currentDebugStatus ? 'Disable Debug Mode' : 'Enable Debug Mode',
-    tabId: currentTab.id
+    title: currentDebugStatus ? "Disable Debug Mode" : "Enable Debug Mode",
+    tabId: currentTab.id,
   });
 }
 
-function updateActiveTab(tabs) {
-  browser.tabs.query({active: true, currentWindow: true}, function(tabs) {
-    if (tabs[0]) {
-      currentTab = tabs[0];
-      parsedUrl  = new URL(currentTab.url);
-      debugParam = parsedUrl.searchParams.get("debug");
-      currentDebugStatus = (debugParam == 1) ? true : false;
-      updateIcon();
-    }
-  });
+async function updateActiveTab() {
+  const [tab] = await new Promise((resolve) =>
+    browser.tabs.query({ active: true, currentWindow: true }, resolve)
+  );
+  if (!tab) return;
+
+  currentTab = tab;
+  parsedUrl = null;
+  currentDebugStatus = false;
+
+  if (currentTab.url) {
+    try {
+      parsedUrl = new URL(currentTab.url);
+      currentDebugStatus = parsedUrl.searchParams.get("debug") === "1";
+    } catch {}
+  }
+
+  updateIcon();
 }
 
 browser.tabs.onUpdated.addListener(updateActiveTab);
 browser.tabs.onActivated.addListener(updateActiveTab);
 browser.windows.onFocusChanged.addListener(updateActiveTab);
+
+colorSchemeQuery?.addEventListener("change", updateIcon);
+
 updateActiveTab();
 
 function toggleDebug() {
-  (currentDebugStatus) ? parsedUrl.searchParams.delete('debug') : parsedUrl.searchParams.set('debug', '1');
-  browser.tabs.update({url: `${parsedUrl}`});
+  if (!parsedUrl) return;
+  currentDebugStatus
+    ? parsedUrl.searchParams.delete("debug")
+    : parsedUrl.searchParams.set("debug", "1");
+  browser.tabs.update({ url: String(parsedUrl) });
 }
 
 browser.browserAction.onClicked.addListener(toggleDebug);

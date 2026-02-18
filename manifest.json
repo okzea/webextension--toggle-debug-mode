@@ -3,13 +3,18 @@
   "name": "Toggle Debug Mode",
   "version": "0.3",
   "icons": {
-    "64": "icons/icon-64.png"
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "64": "icons/icon-64.png",
+    "96": "icons/icon-96.png",
+    "128": "icons/icon-128.png"
   },
   "description": "Toggle Debug Mode",
   "permissions": ["tabs"],
   "browser_action": {
     "default_area": "tabstrip",
-    "default_icon": "icons/icon-64.png",
+    "default_icon": "icons/bug-inactive-light.svg",
     "default_title": "Toggle Debug Mode"
   },
   "background": {
