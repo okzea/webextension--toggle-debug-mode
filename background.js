@@ -21,27 +21,123 @@ const iconPaths = {
   },
 };
 
+const DEFAULT_PARAM_RULES = Object.freeze([
+  {
+    name: "debug",
+    kind: "number",
+    value: "1",
+  },
+]);
+
 const offscreenDocumentPath = "offscreen.html";
+
 let currentTab;
-let parsedUrl;
-let currentDebugStatus = false;
+let currentParsedUrl;
+let currentParamsEnabled = false;
 let currentThemeMode = "light";
+let paramRules = cloneDefaultParamRules();
+
+function cloneDefaultParamRules() {
+  return DEFAULT_PARAM_RULES.map((rule) => ({ ...rule }));
+}
+
+function parseUrl(rawUrl) {
+  if (typeof rawUrl !== "string" || !rawUrl) return null;
+
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeRule(rawRule) {
+  if (!rawRule || typeof rawRule.name !== "string") return null;
+
+  const name = rawRule.name.trim();
+  if (!name) return null;
+
+  const kind =
+    rawRule.kind === "number" || rawRule.kind === "boolean" ? rawRule.kind : "string";
+  let value = rawRule.value == null ? "" : String(rawRule.value);
+
+  if (kind === "number") {
+    if (value.trim() === "") return null;
+    const numberValue = Number(value);
+    if (!Number.isFinite(numberValue)) return null;
+    value = String(numberValue);
+  } else if (kind === "boolean") {
+    value = value === "false" ? "false" : "true";
+  }
+
+  return { name, kind, value };
+}
+
+function normalizeRules(rawRules) {
+  const sourceRules = Array.isArray(rawRules) ? rawRules : [];
+  const uniqueRulesMap = new Map();
+
+  for (const rawRule of sourceRules) {
+    const normalizedRule = normalizeRule(rawRule);
+    if (!normalizedRule) continue;
+    uniqueRulesMap.set(normalizedRule.name, normalizedRule);
+  }
+
+  const normalizedRules = Array.from(uniqueRulesMap.values());
+  return normalizedRules.length > 0 ? normalizedRules : cloneDefaultParamRules();
+}
+
+function getRuleValue(rule) {
+  if (rule.kind === "number") return String(Number(rule.value));
+  if (rule.kind === "boolean") return rule.value === "false" ? "false" : "true";
+  return String(rule.value);
+}
+
+function areRulesEnabled(parsedUrl) {
+  if (!parsedUrl || paramRules.length === 0) return false;
+
+  return paramRules.every((rule) => parsedUrl.searchParams.get(rule.name) === getRuleValue(rule));
+}
+
+function applyRules(parsedUrl) {
+  for (const rule of paramRules) {
+    parsedUrl.searchParams.set(rule.name, getRuleValue(rule));
+  }
+}
+
+function removeRules(parsedUrl) {
+  for (const rule of paramRules) {
+    parsedUrl.searchParams.delete(rule.name);
+  }
+}
 
 function getThemeMode() {
   return currentThemeMode === "dark" ? "dark" : "light";
 }
 
+function getActionTitle() {
+  if (paramRules.length === 1) {
+    const ruleName = paramRules[0].name;
+    return currentParamsEnabled ? `Disable "${ruleName}" toggle` : `Enable "${ruleName}" toggle`;
+  }
+
+  const paramsLabel = `${paramRules.length} params`;
+  return currentParamsEnabled ? `Disable ${paramsLabel} toggle` : `Enable ${paramsLabel} toggle`;
+}
+
 function updateIcon() {
   if (currentTab?.id == null) return;
 
-  const debugState = currentDebugStatus ? "active" : "inactive";
+  const debugState = currentParamsEnabled ? "active" : "inactive";
 
   chrome.action.setIcon({
     path: iconPaths[debugState][getThemeMode()],
     tabId: currentTab.id,
   });
   chrome.action.setTitle({
-    title: currentDebugStatus ? "Disable Debug Mode" : "Enable Debug Mode",
+    title: getActionTitle(),
     tabId: currentTab.id,
   });
 }
@@ -52,40 +148,45 @@ function updateActiveTab() {
     if (!tab) return;
 
     currentTab = tab;
-    parsedUrl = null;
-    currentDebugStatus = false;
-
-    if (typeof currentTab.url === "string") {
-      try {
-        parsedUrl = new URL(currentTab.url);
-        currentDebugStatus = parsedUrl.searchParams.get("debug") === "1";
-      } catch {}
-    }
+    currentParsedUrl = parseUrl(currentTab.url);
+    currentParamsEnabled = areRulesEnabled(currentParsedUrl);
 
     updateIcon();
   });
 }
 
-function toggleDebug(tab) {
+function toggleParams(tab) {
   const tabId = tab?.id ?? currentTab?.id;
-  const tabUrl = tab?.url ?? (parsedUrl ? String(parsedUrl) : null);
+  const parsedUrl = parseUrl(tab?.url) ?? parseUrl(currentParsedUrl ? String(currentParsedUrl) : "");
 
-  if (tabId == null || !tabUrl) return;
+  if (tabId == null || !parsedUrl) return;
 
-  let updatedUrl;
-  try {
-    updatedUrl = new URL(tabUrl);
-  } catch {
-    return;
-  }
-
-  if (updatedUrl.searchParams.get("debug") === "1") {
-    updatedUrl.searchParams.delete("debug");
+  if (areRulesEnabled(parsedUrl)) {
+    removeRules(parsedUrl);
   } else {
-    updatedUrl.searchParams.set("debug", "1");
+    applyRules(parsedUrl);
   }
 
-  chrome.tabs.update(tabId, { url: String(updatedUrl) });
+  chrome.tabs.update(tabId, { url: String(parsedUrl) });
+}
+
+function getStorageSync(defaultValues) {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get(defaultValues, (result) => {
+      if (chrome.runtime.lastError) {
+        resolve(defaultValues);
+        return;
+      }
+
+      resolve(result);
+    });
+  });
+}
+
+async function loadParamRules() {
+  const defaultValues = { paramRules: cloneDefaultParamRules() };
+  const result = await getStorageSync(defaultValues);
+  paramRules = normalizeRules(result.paramRules);
 }
 
 async function ensureOffscreenDocument() {
@@ -125,18 +226,32 @@ async function refreshThemeMode() {
 async function initialize() {
   await ensureOffscreenDocument();
   await refreshThemeMode();
+  await loadParamRules();
   updateActiveTab();
 }
 
 chrome.tabs.onUpdated.addListener(updateActiveTab);
 chrome.tabs.onActivated.addListener(updateActiveTab);
 chrome.windows.onFocusChanged.addListener(updateActiveTab);
-chrome.action.onClicked.addListener(toggleDebug);
+chrome.action.onClicked.addListener(toggleParams);
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "sync" || !changes.paramRules) return;
+
+  paramRules = normalizeRules(changes.paramRules.newValue);
+  currentParamsEnabled = areRulesEnabled(currentParsedUrl);
+  updateIcon();
+});
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "THEME_MODE_CHANGED") {
     currentThemeMode = message.themeMode === "dark" ? "dark" : "light";
     updateIcon();
+    return;
+  }
+
+  if (message?.type === "SETTINGS_UPDATED") {
+    loadParamRules().then(updateActiveTab);
   }
 });
 
