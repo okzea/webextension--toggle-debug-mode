@@ -1,69 +1,146 @@
-const browser = window.browser ?? window.chrome;
+const iconPaths = {
+  active: {
+    light: {
+      16: "icons/bug-active-light-16.png",
+      32: "icons/bug-active-light-32.png",
+    },
+    dark: {
+      16: "icons/bug-active-dark-16.png",
+      32: "icons/bug-active-dark-32.png",
+    },
+  },
+  inactive: {
+    light: {
+      16: "icons/bug-inactive-light-16.png",
+      32: "icons/bug-inactive-light-32.png",
+    },
+    dark: {
+      16: "icons/bug-inactive-dark-16.png",
+      32: "icons/bug-inactive-dark-32.png",
+    },
+  },
+};
 
+const offscreenDocumentPath = "offscreen.html";
 let currentTab;
 let parsedUrl;
 let currentDebugStatus = false;
-
-const colorSchemeQuery = window.matchMedia?.("(prefers-color-scheme: dark)") ?? null;
-const iconPaths = {
-  active: { light: "icons/bug-active-light.svg", dark: "icons/bug-active-dark.svg" },
-  inactive: { light: "icons/bug-inactive-light.svg", dark: "icons/bug-inactive-dark.svg" },
-};
+let currentThemeMode = "light";
 
 function getThemeMode() {
-  return colorSchemeQuery?.matches ? "dark" : "light";
+  return currentThemeMode === "dark" ? "dark" : "light";
 }
 
 function updateIcon() {
-  if (!currentTab?.id) return;
+  if (currentTab?.id == null) return;
 
-  const themeMode = getThemeMode();
   const debugState = currentDebugStatus ? "active" : "inactive";
 
-  browser.browserAction.setIcon({
-    path: iconPaths[debugState][themeMode],
+  chrome.action.setIcon({
+    path: iconPaths[debugState][getThemeMode()],
     tabId: currentTab.id,
   });
-  browser.browserAction.setTitle({
+  chrome.action.setTitle({
     title: currentDebugStatus ? "Disable Debug Mode" : "Enable Debug Mode",
     tabId: currentTab.id,
   });
 }
 
-async function updateActiveTab() {
-  const [tab] = await new Promise((resolve) =>
-    browser.tabs.query({ active: true, currentWindow: true }, resolve)
-  );
-  if (!tab) return;
+function updateActiveTab() {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const [tab] = tabs ?? [];
+    if (!tab) return;
 
-  currentTab = tab;
-  parsedUrl = null;
-  currentDebugStatus = false;
+    currentTab = tab;
+    parsedUrl = null;
+    currentDebugStatus = false;
 
-  if (currentTab.url) {
-    try {
-      parsedUrl = new URL(currentTab.url);
-      currentDebugStatus = parsedUrl.searchParams.get("debug") === "1";
-    } catch {}
+    if (typeof currentTab.url === "string") {
+      try {
+        parsedUrl = new URL(currentTab.url);
+        currentDebugStatus = parsedUrl.searchParams.get("debug") === "1";
+      } catch {}
+    }
+
+    updateIcon();
+  });
+}
+
+function toggleDebug(tab) {
+  const tabId = tab?.id ?? currentTab?.id;
+  const tabUrl = tab?.url ?? (parsedUrl ? String(parsedUrl) : null);
+
+  if (tabId == null || !tabUrl) return;
+
+  let updatedUrl;
+  try {
+    updatedUrl = new URL(tabUrl);
+  } catch {
+    return;
   }
 
-  updateIcon();
+  if (updatedUrl.searchParams.get("debug") === "1") {
+    updatedUrl.searchParams.delete("debug");
+  } else {
+    updatedUrl.searchParams.set("debug", "1");
+  }
+
+  chrome.tabs.update(tabId, { url: String(updatedUrl) });
 }
 
-browser.tabs.onUpdated.addListener(updateActiveTab);
-browser.tabs.onActivated.addListener(updateActiveTab);
-browser.windows.onFocusChanged.addListener(updateActiveTab);
+async function ensureOffscreenDocument() {
+  if (!chrome.offscreen?.createDocument) return false;
 
-colorSchemeQuery?.addEventListener("change", updateIcon);
+  try {
+    if (chrome.runtime.getContexts) {
+      const offscreenUrl = chrome.runtime.getURL(offscreenDocumentPath);
+      const contexts = await chrome.runtime.getContexts({
+        contextTypes: ["OFFSCREEN_DOCUMENT"],
+        documentUrls: [offscreenUrl],
+      });
+      if (contexts.length > 0) return true;
+    }
 
-updateActiveTab();
-
-function toggleDebug() {
-  if (!parsedUrl) return;
-  currentDebugStatus
-    ? parsedUrl.searchParams.delete("debug")
-    : parsedUrl.searchParams.set("debug", "1");
-  browser.tabs.update({ url: String(parsedUrl) });
+    await chrome.offscreen.createDocument({
+      url: offscreenDocumentPath,
+      reasons: ["MATCH_MEDIA"],
+      justification: "Detect light/dark mode to improve action icon contrast.",
+    });
+    return true;
+  } catch (error) {
+    if (String(error).includes("Only a single offscreen")) return true;
+    return false;
+  }
 }
 
-browser.browserAction.onClicked.addListener(toggleDebug);
+async function refreshThemeMode() {
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "GET_THEME_MODE" });
+    if (response?.themeMode === "dark" || response?.themeMode === "light") {
+      currentThemeMode = response.themeMode;
+    }
+  } catch {}
+}
+
+async function initialize() {
+  await ensureOffscreenDocument();
+  await refreshThemeMode();
+  updateActiveTab();
+}
+
+chrome.tabs.onUpdated.addListener(updateActiveTab);
+chrome.tabs.onActivated.addListener(updateActiveTab);
+chrome.windows.onFocusChanged.addListener(updateActiveTab);
+chrome.action.onClicked.addListener(toggleDebug);
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === "THEME_MODE_CHANGED") {
+    currentThemeMode = message.themeMode === "dark" ? "dark" : "light";
+    updateIcon();
+  }
+});
+
+chrome.runtime.onInstalled.addListener(initialize);
+chrome.runtime.onStartup.addListener(initialize);
+
+initialize();
