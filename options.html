@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Toggle Params Options</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main>
+      <h1>Toggle Params Options</h1>
+      <p class="help">
+        All rules below are toggled together when you click the extension icon.
+      </p>
+
+      <section class="rules-panel">
+        <div class="rules-header">
+          <span>Param</span>
+          <span>Value Kind</span>
+          <span>Value</span>
+          <span></span>
+        </div>
+        <div id="rules"></div>
+      </section>
+
+      <div class="controls">
+        <button id="add-rule" type="button">Add Param</button>
+        <button id="reset-defaults" type="button">Reset Default</button>
+        <button id="save" type="button">Save</button>
+      </div>
+
+      <p id="status" role="status" aria-live="polite"></p>
+    </main>
+
+    <template id="rule-template">
+      <div class="rule-row">
+        <input class="param-name" type="text" placeholder="debug" aria-label="Param name">
+
+        <select class="param-kind" aria-label="Value kind">
+          <option value="string">string</option>
+          <option value="number">number</option>
+          <option value="boolean">boolean</option>
+        </select>
+
+        <div class="value-field">
+          <input class="param-value-text" type="text" placeholder="1" aria-label="Param value">
+          <select class="param-value-boolean" aria-label="Boolean value">
+            <option value="true">true</option>
+            <option value="false">false</option>
+          </select>
+        </div>
+
+        <button class="remove-rule" type="button">Remove</button>
+      </div>
+    </template>
+
+    <script src="options.js"></script>
+  </body>
+</html>

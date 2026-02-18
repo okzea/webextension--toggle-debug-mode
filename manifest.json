@@ -1,18 +1,29 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "name": "Toggle Debug Mode",
-  "version": "0.3",
+  "version": "0.5",
   "icons": {
-    "64": "icons/icon-64.png"
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "64": "icons/icon-64.png",
+    "96": "icons/icon-96.png",
+    "128": "icons/icon-128.png"
   },
   "description": "Toggle Debug Mode",
-  "permissions": ["tabs"],
-  "browser_action": {
-    "default_area": "tabstrip",
-    "default_icon": "icons/icon-64.png",
+  "permissions": ["tabs", "offscreen", "storage"],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_icon": {
+      "16": "icons/bug-inactive-light-16.png",
+      "32": "icons/bug-inactive-light-32.png"
+    },
     "default_title": "Toggle Debug Mode"
   },
   "background": {
-    "scripts": ["background.js"]
+    "service_worker": "background.js"
   }
 }
