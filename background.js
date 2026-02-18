@@ -36,6 +36,7 @@ let currentParsedUrl;
 let currentParamsEnabled = false;
 let currentThemeMode = "light";
 let paramRules = cloneDefaultParamRules();
+let paramRulesReadyPromise = null;
 
 function cloneDefaultParamRules() {
   return DEFAULT_PARAM_RULES.map((rule) => ({ ...rule }));
@@ -142,7 +143,11 @@ function updateIcon() {
   });
 }
 
-function updateActiveTab() {
+async function updateActiveTab() {
+  try {
+    await ensureParamRulesLoaded();
+  } catch {}
+
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const [tab] = tabs ?? [];
     if (!tab) return;
@@ -155,7 +160,11 @@ function updateActiveTab() {
   });
 }
 
-function toggleParams(tab) {
+async function toggleParams(tab) {
+  try {
+    await ensureParamRulesLoaded();
+  } catch {}
+
   const tabId = tab?.id ?? currentTab?.id;
   const parsedUrl = parseUrl(tab?.url) ?? parseUrl(currentParsedUrl ? String(currentParsedUrl) : "");
 
@@ -187,6 +196,19 @@ async function loadParamRules() {
   const defaultValues = { paramRules: cloneDefaultParamRules() };
   const result = await getStorageSync(defaultValues);
   paramRules = normalizeRules(result.paramRules);
+}
+
+function queueParamRulesLoad() {
+  paramRulesReadyPromise = loadParamRules().catch((error) => {
+    paramRulesReadyPromise = null;
+    throw error;
+  });
+  return paramRulesReadyPromise;
+}
+
+function ensureParamRulesLoaded() {
+  if (paramRulesReadyPromise) return paramRulesReadyPromise;
+  return queueParamRulesLoad();
 }
 
 async function ensureOffscreenDocument() {
@@ -226,8 +248,8 @@ async function refreshThemeMode() {
 async function initialize() {
   await ensureOffscreenDocument();
   await refreshThemeMode();
-  await loadParamRules();
-  updateActiveTab();
+  await ensureParamRulesLoaded().catch(() => {});
+  await updateActiveTab();
 }
 
 chrome.tabs.onUpdated.addListener(updateActiveTab);
@@ -251,7 +273,7 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 
   if (message?.type === "SETTINGS_UPDATED") {
-    loadParamRules().then(updateActiveTab);
+    queueParamRulesLoad().then(updateActiveTab).catch(updateActiveTab);
   }
 });
 
